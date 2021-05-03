@@ -4,9 +4,9 @@ Vous trouverez ici mes write-ups pour les challenges du FCSC2021 \#FCSC2021 \#Te
 
 J'ai personnellement fini 3ème junior (21ème au classement général) à ce CTF, avec 3458 points.
 
-Pour la qualification en équipe de France, j'ai rédigé de manière complète et détaillée les write-ups de `BattleChip` (Misc) et `Malware 3/3` (Reverse).
+Pour la qualification en équipe de France, j'ai rédigé de manière complète et détaillée les write-ups de [BattleChip](https://github.com/Antoine-Gicquel/FCSC2021-writeups/tree/master/Misc/BattleChip) (Misc) et [Malware 3](https://github.com/Antoine-Gicquel/FCSC2021-writeups/tree/master/reverse/Malware%203) (Reverse).
 
-Le reste des write-ups contient pour l'instant uniquement des rapides indications de résolution. (ou des **Too Long; Didn't *Write* **, selon comment on voit les choses...)
+Le reste des write-ups contient pour l'instant uniquement des rapides indications de résolution. (ou des **Too Long; Didn't Write **, selon comment on voit les choses...)
 
 ## Les write-ups
 
