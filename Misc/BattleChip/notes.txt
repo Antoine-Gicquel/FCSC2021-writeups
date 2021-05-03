@@ -1,0 +1,180 @@
+
+Lecture de la source :
+1 : reverse les macros de chiffrement et vérification -> chiffrement calcule XOR(mem[Iinit + k], KEY[k])
+2 : cache LRU, partagé entre le trusted et le untrusted
+3 : Le chiffrement renvoie le nombre de cycles qu'il a pris
+
+On cherche l'objectif :
+Faire en sorte que exc_verify retourne 0, pour que le flag apparaisse en mémoire et qu'on puisse le lire,
+par la même méthode que pour Chip & Fish (afficher des sprites à l'écran)
+
+Environnement de débug : flag = b"aaaaaaaaaaa", secret_key = "ABCDEFGHIJ", prints des registres, de la stack
+
+Programmation en CHIP-8 : http://devernay.free.fr/hacks/chip8/chip8def.htm
+
+Pas à pas, commençons par essayer de récupérer le 1er octet :
+Etape 1 : Faire pointer I sur la stack (seule partie de la mémoire du trustedcontext que l'on controle), et regarder combien de temps
+il met à chiffrer une stack pleine de 0s. -> 61 ticks
+Etape 2 : Tester en mettant avant l'exécution du chiffrement : xor 0, 0x41 -> 60 ticks
+
+Ici on voit que lorsque le bon xor est déjà en cache, le calcul du chiffrement prend 1 cycle de moins.
+
+Ainsi, pour récupérer le premier octet d'un secret aléatoire, il faut :
+1 - Pointer I sur la stack
+1 - initialiser un registre A à 0 (L'hypothèse sur l'octet que l'on souhaite récupérer)
+2 - initialiser un registre B à 0 (la valeur déjà présente sur la stack à l'endroit du caractère que l'on veut récupérer)
+3 - réinitialiser le cache (on verra plus tard)
+4 - xor B, A
+5 - Chiffrer
+6 - Si vF = 60, stocker A dans un registre C
+7 - Si A != 255, A <- A+1
+8 - Si A != 255, jump à l'étape 2
+
+A la fin de ce processus, l'octet aléatoire sera stocké dans C. On remarque que si l'octet est égal à 255, je ne le trouve pas.
+C'est peu probable, j'ai décidé de ne pas m'en soucier
+
+Comment on réinitialise le cache ?
+Tous les xor dans le trustedcontext sont de la forme XOR mem[i], key[j]
+Le cache ne reconnait pas la commutativité du XOR
+Il suffit donc de remplir le cache de XOR N, M, où N est un octet qui n'est pas présent dans la portion
+de la mémoire que l'on utilise (pour l'instant la stack est remplie de 0, donc il suffit de mettre N != 0) et M quelconque
+
+Comment on fait un "Si, alors" ?
+skip if ...
+Instruction
+
+
+J'avais peur de mettre des valeurs dans v0, v1, v2, v3, étant donné qu'ils étaient utilisés par le trustedcontext
+J'ai réalisé plus tard que ces registres étaient différents de ceux du untrusted context et que je pouvais les utiliser.
+Pour l'instant j'ai donc utilisé A = v4, B = v5, C = ve
+
+Essai : marche pas... Pourquoi ? Débug : ajout des cache miss
+Si on met xor 0, K dans le cache, et que le 2ème octet de la clé vaut K, l'exécution sera accélérée aussi...
+
+Solution : mettre une valeur différente (V) des autres sur la pile à la position de l'octet qui nous intéresse, et la mettre dans
+le registre B de l'algorithme précédent. Ainsi, le speed-up ne peut s'effectuer que sur le caractère voulu.
+
+
+Comment mettre une valeur sur la stack ? call.
+
+
+
+Tentative 2 :
+1 - call à partir d'une adresse dont les deux octets sont différents (pas 0x202 ni 0x404 par exemple) pour garantir l'unicité
+de l'octet voulu (l'adresse vers laquelle on effectue le call n'a aucune importance, j'ai simplement mis l'adresse suivante)
+2 - Pointer I sur la stack, à l'adresse à laquelle est stocké l'octet de poids faible de l'adresse de retour du call précédent
+3 - Initialiser un registre A à 0
+4 - Initialiser un registre B à la valeur pointée par I
+5 - Réinitialiser le cache
+6 - xor B, A
+7 - Si vF = 60, stocker A dans un registre C
+8 - Si A != 255, A <- A+1
+9 - Si A != 255, jump à l'étape 2
+
+*L'étape 4 peut se hardcoder, étant donné que je sais depuis quelle adresse je call* 
+Et ça marche, avec l'output de débug ! On a bien 0x65 (premier caractère de la secret_key de débug) dans C (=ve)
+
+
+
+Obtenir le 2ème caractère ?
+L'algorithme est quasiment le même, étant donné que le call de l'agorithme précédent nous a fournit 2 octets uniques :
+
+1 - call à partir d'une adresse dont les deux octets sont différents (pas 0x202 ni 0x404 par exemple) pour garantir l'unicité
+de l'octet voulu (l'adresse vers laquelle on effectue le call n'a aucune importance, j'ai simplement mis l'adresse suivante)
+2 - Pointer I sur la stack, à l'adresse à laquelle est stocké l'octet de poids faible de l'adresse de retour du call précédent
+3 - Initialiser un registre A à 0
+4 - Initialiser un registre B à la valeur pointée par (I + 1)
+5 - Réinitialiser le cache
+6 - xor B, A
+7 - Si vF = 60, stocker A dans un registre C
+8 - Si A != 255, A <- A+1
+9 - Si A != 255, jump à l'étape 2
+
+On obtient là le deuxième octet !
+
+
+Obtenir le 1er et le 2ème en même temps ?
+Prêt pour enchainer ? A partir d'ici, j'ai commencé à automatiser la génération de ROM
+L'algorithme est encore une fois similaire aux précédents : 
+1 - Récupérer le 1er caractère avec l'agorithme défini plus haut dans ce but
+2 - Compléter le programme précédent en récupérant le 2ème caractère avec l'algorithme défini plus haut dans ce but.
+
+
+Obtenir les caractères suivants
+A partir d'ici j'ai commencé à réfléchir à une stratégie générale pour obtenir les 10 octets de la secret key. Mon idée était la suivante:
+1 - Disposer 10 octets tous différents dans la stack
+2 - Généraliser la méthode d'obtention du deuxième octet à n'importe quel octet, simplement en modifiant la valeur de B
+
+Comment disposer 10 octets tous différents dans la stack ?
+Jump depuis des adresses bien choisies : 0x0212, 0x0314, 0x0416, 0x0518, 0x061a
+(octets dans la stack = adresses d'origine des jumps + 2 = 0x021402160418051a061c)
+Programme : 
+
+0x200 : 6100
+0x202 : 6100
+[...]
+0x20e : 6100
+0x210 : 6100
+0x212 : 2214
+0x214 : 6100
+[...]
+0x312 : 6100
+0x314 : 2316
+0x316 : 6100
+[...]
+0x412 : 6100
+0x414 : 6100
+0x416 : 2418
+0x418 : 6100
+[........]
+0x61a : 261c
+
+C'est pas très écolo, mais c'est simple à programmer. Pour faire un programme qui va plus vite,
+on aurait pu jump à chaque fois proche du prochain jump, mais je ne cherche pas à fare rapide, je cherche à faire simple.
+
+Aussi, je me suis posé la question d'où stocker les 10 octets du secret. En effet, il me semblait que v0, v1, v2, v3 et vF étaient non-persistents car modifiés
+par la procédure de chiffrement. C'est à ce moment que j'ai réalisé, d'abord empiriquement puis par la relecture du code source, que ces registres étaient propres
+au contexte, et que donc il m'était possible d'utiliser les 16 registres.
+Cela m'arrange bien, car j'ai besoin de 4 registres pour faire marcher mon algorithme (2 pour le nettoyage du cache, 2 pour la récupération de chaque octet) + vF = 5 registres, plus le stockage des 10 octets de clés dans 10 registres... Ca passe, mais c'est limite !
+
+Le pseudo-code du programme implémentant mes avancées est le suivant :
+1 - Insérer les 10 octets dans la stack
+2 - Compléter la ROM en ajoutant un par un les programmes permettant de récupérer chaque octet, en les stockant à chaque fois
+dans un registre différent.
+
+Dans l'environnement de débug, on voit clairement la secret key apparaitre dans les registres, bingo !
+
+Plus qu'à remettre les registres dans l'ordre, et stocker ça sur la pile (instruction fx55)
+
+Une fois la secret key sur la pile, on observe son offset grâce à l'output de débug, et on demande à l'émulateur
+la vérification des octets à partir de cet offset (2 instructions seulement : charger l'adresse de la secret key sur
+la stack dans I, et demander au processeur de vérifier la secret key)
+
+Une fois ceci effectuée, le flag est sur la stack ! Encore une fois, on récupère son offset grâce aux informations de débug, et on peut maintenant lire la pile grâce à la méthode suivante :
+n <- 20
+A <- 0
+B <- 0
+base_flag_addr <- ...
+I <- base_flag_addr
+POUR i allant de 0 à n:
+	I <- I + 1
+	B <- B + 1
+	Afficher en x=A, y=B l'octet à l'adresse I en mémoire (instruction dAB1)
+Avec A et B des registres quelconques.
+
+Maintenant on rassemble tous les morceaux, l'algorithme final :
+1 - Initialiser la pile avec 10 octets différents
+2 - Récupérer les octets un par un, les stocker dans des registres libres
+3 - Remettre les registres dans l'ordre et les stocker sur la pile
+4 - Afficher la pile
+
+
+Après une conversion binaire -> hexadécimal, on obtient le flag !
+
+
+
+
+Remarque : J'ai en réalité procédé différemment pour lire les octets un par un en mémoire : une fois la pile initialisée, j'ai pplacé I à la fin de ma suite d'octets, et j'ai décrémenté I. Cela me permettait de garder un B constant dans l'algorithme décrit plus haut, et ne change rien d'autre que ça.
+
+
+

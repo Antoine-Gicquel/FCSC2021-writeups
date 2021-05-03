@@ -1,0 +1,3 @@
+L'objectif c'est de faire collisionner les hashs sur les 4 premiers octets. Cad trouver une boucle avec X tel que (H ^ X ^ AES(H, X))[:4] = H[:4], où H = 0 ^ AES(0, 0) (le h qu'on aurait après avoir envoyé un message nul)
+
+Ensuite il reste plus qu'à envoyer le message nul (4 octets de 0, noté 0 pour la suite) puis 0X, puix 0XX, puis 0XXX, ...
